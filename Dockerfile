@@ -1,22 +1,28 @@
-FROM golang:1.22-alpine as build
+FROM golang:1.24-alpine AS build
 
-LABEL maintainer="MinIO Inc <dev@min.io>"
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 
-ENV GOPATH /go
-ENV CGO_ENABLED 0
+ENV GOPATH=/go
+ENV CGO_ENABLED=0
 
+WORKDIR /src
 
 RUN apk add -U --no-cache ca-certificates
-RUN apk add -U curl
-RUN curl -s -q https://raw.githubusercontent.com/minio/mc/master/LICENSE -o /go/LICENSE
-RUN curl -s -q https://raw.githubusercontent.com/minio/mc/master/CREDITS -o /go/CREDITS
-RUN go install -v -ldflags "$(go run buildscripts/gen-ldflags.go)" "github.com/minio/mc@latest"
 
-FROM scratch
+COPY go.mod go.sum ./
+RUN go mod download
 
-COPY --from=build /go/bin/mc  /usr/bin/mc
-COPY --from=build /go/CREDITS /licenses/CREDITS
-COPY --from=build /go/LICENSE /licenses/LICENSE
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY . .
+
+RUN set -eux; \
+	mkdir -p /out; \
+	GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" go build -trimpath -o /out/mc; \
+	sha256sum /out/mc > /out/mc.sha256sum
+
+FROM minio/mc:latest
+
+COPY --from=build /out/mc /usr/bin/mc
+COPY --from=build /out/mc.sha256sum /usr/bin/mc.sha256sum
 
 ENTRYPOINT ["mc"]
